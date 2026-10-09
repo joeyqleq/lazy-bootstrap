@@ -9,10 +9,6 @@
   A checkpointed Ubuntu VPS bootstrap for a repeatable shell, aaPanel, DNS/TLS, and optional local AI stack.
 </p>
 
-<p align="center">
-  <img src="assets/lazy-bootstrap-logo-small.png" alt="Lazy Bootstrap icon" width="96">
-</p>
-
 ## What it does
 
 Lazy Bootstrap is a single Bash installer plus a sourced environment file. It is designed for fresh Ubuntu cloud VMs and for recovering a partially completed installation without blindly repeating every operation.
