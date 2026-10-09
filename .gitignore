@@ -1,0 +1,10 @@
+.env
+env.local
+*.secret
+*.pem
+*.key
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/

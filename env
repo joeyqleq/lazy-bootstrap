@@ -1,0 +1,144 @@
+# jq universal Ubuntu bootstrap configuration.
+# Normally change TAILSCALE_AUTH_KEY for each new VM. Change AAPANEL_DOMAIN when the VM uses a different panel hostname.
+
+# --- Identity / accounts ---
+# System/static hostname; aaPanel may change it during install, so bootstrap reapplies this afterwards.
+HOSTNAME='CHANGE_ME_HOSTNAME'
+TARGET_USER='jq'
+TARGET_HOME='/home/jq'
+SOURCE_USER_OVERRIDE=''
+NEW_USER_PASSWORD='CHANGE_ME_USER_PASSWORD'
+
+# --- Tailscale ---
+TAILSCALE_AUTH_KEY='CHANGE_ME_TAILSCALE_AUTH_KEY'
+
+# --- GitHub ---
+GITHUB_USERNAME='joeyqleq'
+GITHUB_TOKEN='CHANGE_ME_GITHUB_TOKEN'
+
+# --- SSH ---
+SSH_PORT='6722'
+
+# --- Memory / swap ---
+# Leave overrides empty to auto-size from detected physical RAM.
+SWAP_FILE='/swapfile'
+SWAP_SIZE_MIB_OVERRIDE=''
+VM_SWAPPINESS_OVERRIDE=''
+VM_VFS_CACHE_PRESSURE_OVERRIDE=''
+VM_DIRTY_BACKGROUND_RATIO_OVERRIDE=''
+VM_DIRTY_RATIO_OVERRIDE=''
+
+# --- aaPanel Happy Edition ---
+# Happy Edition URLs. The update script is required after a fresh install so
+# the resulting panel matches the current Happy Edition 8.0.6 tree.
+AAPANEL_URL_PRIMARY='https://panel.luce.moe/install/install_7.0_en.sh'
+AAPANEL_URL_FALLBACK='https://aa.maxcdn.top/install/install_7.0_en.sh'
+AAPANEL_UPGRADE_URL_PRIMARY='https://panel.luce.moe/install/update_7.x_en.sh'
+AAPANEL_UPGRADE_URL_FALLBACK='https://aa.maxcdn.top/install/update_7.x_en.sh'
+AAPANEL_EXPECTED_VERSION='8.0.6'
+AAPANEL_PANEL_CERT_MODE='exact'
+AAPANEL_DNS_PROPAGATION_SECONDS='60'
+AAPANEL_DOWNLOAD_CONNECT_TIMEOUT='12'
+AAPANEL_DOWNLOAD_MAX_TIME='60'
+AAPANEL_ROOT='/www'
+AAPANEL_PANEL_DIR='/www/server/panel'
+AAPANEL_NGINX_DIR='/www/server/nginx'
+# Used only if aaPanel's local App Store catalog cannot be parsed.
+AAPANEL_NGINX_FALLBACK_VERSION='1.30'
+AAPANEL_NGINX_VERSION_OVERRIDE='1.30'
+AAPANEL_NGINX_CHECK_INTERVAL='15'
+AAPANEL_NGINX_STALL_SECONDS='240'
+# 0 disables a wall-clock cutoff; genuine-idle detection still aborts stalled installs.
+AAPANEL_NGINX_HARD_TIMEOUT='0'
+AAPANEL_NGINX_QUICK_FIRST='1'
+AAPANEL_NGINX_COMPILE_FALLBACK='1'
+AAPANEL_NGINX_TYPE0_FALLBACK='0'
+AAPANEL_WWWROOT='/www/wwwroot'
+AAPANEL_PORT='8886'
+AAPANEL_USER='p5n'
+AAPANEL_PASSWORD='CHANGE_ME_AAPANEL_PASSWORD'
+AAPANEL_DOMAIN='CHANGE_ME_PANEL_DOMAIN'
+
+# --- Cloudflare / aaPanel DNS API ---
+CLOUDFLARE_EMAIL='CHANGE_ME_CLOUDFLARE_EMAIL'
+CLOUDFLARE_API_KEY='CHANGE_ME_CLOUDFLARE_API_KEY'
+CLOUDFLARE_ALIAS='global'
+
+
+# --- Optional AI inference / Open WebUI ---
+AI_INFERENCE_MODE='ask'
+OXRC_GEMINI_API_KEY=''
+OPENWEBUI_SUBDOMAIN='auto'
+WEBUI_URL='auto'
+OPENWEBUI_PORT='3000'
+OLLAMA_PORT='11434'
+AI_COMPOSE_NAME='openwebui-ollama'
+AI_PRIMARY_MODEL='auto'
+AI_REASONING_MODEL='gpt-oss:20b'
+AI_PULL_REASONING_MODEL='1'
+AI_DECISION_MODEL='tev1:0.8b'
+AI_PULL_DECISION_MODEL='1'
+OPENWEBUI_IMAGE='ghcr.io/open-webui/open-webui:v0.11.4-slim'
+OLLAMA_MAX_LOADED_MODELS='1'
+OLLAMA_NUM_PARALLEL='1'
+OLLAMA_KEEP_ALIVE='5m'
+OPENWEBUI_CF_PROXIED='0'
+OPENWEBUI_DNS_OVERWRITE='0'
+TERMINAL_THEME='random'
+
+# Initial admin. WEBUI_ADMIN_PASSWORD is only consumed on an empty user DB.
+WEBUI_ADMIN_NAME='p5n'
+WEBUI_ADMIN_EMAIL='CHANGE_ME_OPENWEBUI_ADMIN_EMAIL'
+WEBUI_ADMIN_PASSWORD='CHANGE_ME_OPENWEBUI_PASSWORD'
+
+# Agentic/web defaults for new Open WebUI deployments.
+ENABLE_WEB_SEARCH='true'
+WEB_SEARCH_ENGINE='exa'
+EXA_API_KEY='CHANGE_ME_EXA_API_KEY'
+WEB_LOADER_ENGINE='firecrawl'
+FIRECRAWL_API_BASE_URL='https://api.firecrawl.dev'
+FIRECRAWL_API_KEY='CHANGE_ME_FIRECRAWL_API_KEY'
+ENABLE_WEB_SEARCH_CONFIRMATION='false'
+ENABLE_SUBAGENTS='true'
+SUBAGENTS_BACKGROUND_ENABLED='true'
+SUBAGENTS_MAX_CONCURRENT='4'
+SUBAGENTS_MAX_ASYNC='4'
+SUBAGENTS_MAX_ITERATIONS='30'
+SUBAGENTS_MAX_OUTPUT='30000'
+TASK_MODEL='tev1:0.8b'
+ENABLE_API_KEYS='true'
+ENABLE_OLLAMA_API='true'
+ENABLE_OPENAI_API='true'
+DEFAULT_MODEL_PARAMS='{"function_calling":"native"}'
+DEFAULT_MODEL_METADATA='{"capabilities":{"web_search":true}}'
+DEFAULT_INTERFACE_SETTINGS='{"webSearch":"always"}'
+
+# --- Repositories / tools ---
+PORTSEY_REPO='https://github.com/joeyqleq/Portsey'
+NANORC_REPO='https://github.com/scopatz/nanorc'
+BREW_PREFIX='/home/linuxbrew/.linuxbrew'
+BREW_BIN='/home/linuxbrew/.linuxbrew/bin/brew'
+
+# --- Bootstrap state / logs ---
+STATE_DIR='/var/lib/jq-bootstrap'
+LOG_FILE='/var/log/jq-bootstrap.log'
+
+# --- Session handoff ---
+# 1 = after a successful interactive bootstrap, enter jq automatically.
+AUTO_ENTER_TARGET_SHELL='1'
+
+# --- Installer interactivity / visibility ---
+# Print a still-running notice this often while any step is executing.
+STEP_WATCHDOG_SECONDS='45'
+# 1 = automatically feed "yes" to Homebrew install/cask confirmation prompts.
+HOMEBREW_AUTO_YES='1'
+
+# --- Zsh4Humans unattended bootstrap ---
+Z4H_UPSTREAM_URL='https://raw.githubusercontent.com/romkatv/zsh4humans/v5'
+Z4H_CORE_TIMEOUT='180'
+Z4H_FINALIZE_TIMEOUT='240'
+Z4H_NET_CONNECT_TIMEOUT='15'
+Z4H_NET_MAX_TIME='120'
+Z4H_KEYBOARD='pc'
+Z4H_START_TMUX='no'
+Z4H_DIRENV='yes'
