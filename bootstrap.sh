@@ -1446,6 +1446,10 @@ verify_terminal_theme() {
   grep -Fq 'POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(jq_host tailscale_ip time newline status command_execution_time)' "$d/p10k.zsh" || return 1
   grep -Fq 'set titlecolor ' "$d/nanorc" || return 1
   grep -Fq 'set promptcolor ' "$d/nanorc" || return 1
+  # GNU nano rejects global `set` directives in included syntax files.
+  # Verify that the generated palette was embedded in the top-level nanorc.
+  cmp -s "$d/nanorc" <(sed -n '/^# jq bootstrap curated GNU nano UI theme:/,$p' "$TARGET_HOME/.nanorc") || return 1
+  ! grep -Fq 'include "/home/jq/.config/jq-theme/nanorc"' "$TARGET_HOME/.nanorc"
 }
 
 write_embedded_dotfiles() {
@@ -3864,9 +3868,12 @@ set numbercolor blue
 set keycolor ,red
 set functioncolor magenta
 
-# Curated UI palette selected as a pair with the Powerlevel10k theme. Keep this last so it wins.
-include "/home/jq/.config/jq-theme/nanorc"
+# Curated UI palette is appended directly by bootstrap: Nano forbids `set`
+# directives inside included syntax files.
 __JQ_NANORC_EOF__
+  # These global UI directives must be in the top-level nanorc, not an include.
+  # Keep them after the scopatz syntax pack to give the curated palette priority.
+  cat "$TARGET_HOME/.config/jq-theme/nanorc" >> "$TARGET_HOME/.nanorc"
 
   cat > "$TARGET_HOME/.oxrc" <<'__JQ_OXRC_EOF__'
 
@@ -4030,7 +4037,9 @@ verify_dotfiles() {
   hash_is "f9cd85024e54f3e74ba6c32e943af752ef93f2d69cc664aaf35cfa37330360f2" "$TARGET_HOME/.zshrc" &&
   hash_is "49a860e7863c2d1fd2f4d56d16ecf9d7c0131052d1fb7e3ae36e5bae8021501e" "$TARGET_HOME/.zsh_aliases" &&
   hash_is "90fed5a3ecb4694d1d969e9089b1168db46ae244ad4bdfee39bccee96e6ab4b6" "$TARGET_HOME/.p10k.zsh" &&
-  hash_is "fce6e808889a9cdaf8fe0cb0b0be63d1e04d3bb8fb079ee2029e47b36edc9cb9" "$TARGET_HOME/.nanorc" &&
+  # The Nano palette changes on every run, so verify its static prefix by hash
+  # and its dynamic suffix exactly against the selected theme file.
+  [[ "$(sed '/^# jq bootstrap curated GNU nano UI theme:/,$d' "$TARGET_HOME/.nanorc" | sha256sum | awk '{print $1}')" == "dbcd139c6a1d6f71a2fdfafc7990df920d2dd0f3e87d25aa06ea6d494cd6c3ea" ]] &&
   verify_oxrc &&
   verify_terminal_theme &&
   [[ "$(stat -c '%U:%G' "$TARGET_HOME/.zshrc")" == "$TARGET_USER:$TARGET_USER" ]]
