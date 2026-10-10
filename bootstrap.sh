@@ -4034,9 +4034,9 @@ verify_oxrc() {
 
 verify_dotfiles() {
   hash_is "d045f99c405fc69a02d0aed607486cbfb8f9fc543aabd1902fe08d860861477e" "$TARGET_HOME/.zshenv" &&
-  hash_is "f9cd85024e54f3e74ba6c32e943af752ef93f2d69cc664aaf35cfa37330360f2" "$TARGET_HOME/.zshrc" &&
+  hash_is "b8eedac7746a9ac86fee99db38ec2e61dfa681420e5532525cd1606fc4a6dad9" "$TARGET_HOME/.zshrc" &&
   hash_is "49a860e7863c2d1fd2f4d56d16ecf9d7c0131052d1fb7e3ae36e5bae8021501e" "$TARGET_HOME/.zsh_aliases" &&
-  hash_is "90fed5a3ecb4694d1d969e9089b1168db46ae244ad4bdfee39bccee96e6ab4b6" "$TARGET_HOME/.p10k.zsh" &&
+  hash_is "9909c4035d2e829b5d74af8f074e84493bea289dcbf02dc336fe47272fea91d4" "$TARGET_HOME/.p10k.zsh" &&
   # The Nano palette changes on every run, so verify its static prefix by hash
   # and its dynamic suffix exactly against the selected theme file.
   [[ "$(sed '/^# jq bootstrap curated GNU nano UI theme:/,$d' "$TARGET_HOME/.nanorc" | sha256sum | awk '{print $1}')" == "dbcd139c6a1d6f71a2fdfafc7990df920d2dd0f3e87d25aa06ea6d494cd6c3ea" ]] &&
