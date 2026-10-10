@@ -5575,7 +5575,16 @@ server {
 NGINX_GENERIC
   chmod 644 "$conf"
   "$AAPANEL_NGINX_DIR/sbin/nginx" -t || die "Universal aaPanel Nginx vhost failed syntax validation."
-  "$AAPANEL_NGINX_DIR/sbin/nginx" -s reload
+  # An aaPanel install can leave an empty nginx.pid and no master running.
+  # Reload only a live master; otherwise start the service for the first time.
+  local pidfile="$AAPANEL_NGINX_DIR/logs/nginx.pid" current_pid=""
+  [[ -s "$pidfile" ]] && read -r current_pid < "$pidfile" || true
+  if [[ "$current_pid" =~ ^[0-9]+$ ]] && kill -0 "$current_pid" 2>/dev/null &&
+     [[ "$(ps -p "$current_pid" -o comm= 2>/dev/null)" == "nginx" ]]; then
+    "$AAPANEL_NGINX_DIR/sbin/nginx" -s reload || die "Cannot reload aaPanel Nginx"
+  else
+    /etc/init.d/nginx start || die "Cannot start aaPanel Nginx"
+  fi
   return 0
 
   : <<'LEGACY_NGINX_TEMPLATE'
@@ -5665,7 +5674,9 @@ verify_panel_vhost() {
   grep -Fq "proxy_set_header Host $AAPANEL_DOMAIN;" "$conf" &&
   grep -Fq "proxy_set_header X-Forwarded-Host $AAPANEL_DOMAIN;" "$conf" &&
   grep -Fq 'proxy_set_header X-Forwarded-Port 443;' "$conf" &&
-  "$AAPANEL_NGINX_DIR/sbin/nginx" -t >/dev/null 2>&1
+  "$AAPANEL_NGINX_DIR/sbin/nginx" -t >/dev/null 2>&1 &&
+  [[ -s "$AAPANEL_NGINX_DIR/logs/nginx.pid" ]] &&
+  kill -0 "$(cat "$AAPANEL_NGINX_DIR/logs/nginx.pid")" 2>/dev/null
 }
 
 verify_panel_domain_binding() {
