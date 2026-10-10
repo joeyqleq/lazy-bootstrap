@@ -5135,7 +5135,7 @@ PY_NGX_VER
 aapanel_nginx_process_snapshot() {
   local leader="$1" pids="" csv=""
   if command -v pstree >/dev/null 2>&1; then
-    pids="$(pstree -p "$leader" 2>/dev/null | grep -oE '\([0-9]+\)' | tr -d '()' | sort -nu | paste -sd, -)"
+    pids="$(pstree -p "$leader" 2>/dev/null | grep -oE '\([0-9]+\)' | tr -d '()' | sort -nu | paste -sd, -)" || true
   fi
   [[ -n "$pids" ]] || pids="$leader"
   ps -p "$pids" -o pid=,ppid=,stat=,%cpu=,%mem=,etime=,comm=,args= 2>/dev/null || true
@@ -5144,7 +5144,7 @@ aapanel_nginx_process_snapshot() {
 aapanel_nginx_cpu_sum() {
   local leader="$1" pids=""
   if command -v pstree >/dev/null 2>&1; then
-    pids="$(pstree -p "$leader" 2>/dev/null | grep -oE '\([0-9]+\)' | tr -d '()' | sort -nu | paste -sd, -)"
+    pids="$(pstree -p "$leader" 2>/dev/null | grep -oE '\([0-9]+\)' | tr -d '()' | sort -nu | paste -sd, -)" || true
   fi
   [[ -n "$pids" ]] || pids="$leader"
   ps -p "$pids" -o %cpu= 2>/dev/null | awk '{s+=$1} END{printf "%.1f", s+0}'
@@ -5202,7 +5202,7 @@ run_aapanel_nginx_attempt() {
     else
       idle=$((idle+interval))
     fi
-    cpu="$(aapanel_nginx_cpu_sum "$pid")"
+    cpu="$(aapanel_nginx_cpu_sum "$pid")" || cpu="0.0"
 
     if (( elapsed % 60 < interval )); then
       printf '\033[1;35m[NGINX]\033[0m elapsed=%ss silent=%ss aggregate-cpu=%s%%\n' "$elapsed" "$idle" "$cpu"
