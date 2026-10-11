@@ -1079,11 +1079,24 @@ setup_homebrew() {
 # GitHub CLI credential setup
 # ---------------------------------------------------------------------------
 
+# Cloud VMs under load can suffer transient GitHub TLS handshake timeouts.
+# Retry reads without ever printing tokens or confusing network errors with
+# invalid credentials. Only a verified account login passes this check.
+github_api_login() {
+  local n login
+  for n in 1 2 3; do
+    login="$(run_as_target timeout 30 gh api user --jq .login 2>/dev/null)" &&
+      [[ -n "$login" ]] && { printf '%s\n' "$login"; return 0; }
+    (( n == 3 )) || sleep "$n"
+  done
+  return 1
+}
+
 verify_github() {
   local login
-  login="$(run_as_target gh api user --jq .login 2>/dev/null || true)"
+  login="$(github_api_login || true)"
   [[ "$login" == "$GITHUB_USERNAME" ]] &&
-  run_as_target gh auth status --hostname github.com >/dev/null 2>&1
+  run_as_target timeout 30 gh auth status --hostname github.com >/dev/null 2>&1
 }
 
 setup_github() {
@@ -1106,7 +1119,7 @@ setup_github() {
   run_as_target git config --global color.ui auto
 
   local login
-  login="$(run_as_target gh api user --jq .login)"
+  login="$(github_api_login)" || die "GitHub authentication API did not respond after retries."
   [[ "$login" == "$GITHUB_USERNAME" ]] ||
     die "GitHub token authenticated as '$login', expected '$GITHUB_USERNAME'."
 }
