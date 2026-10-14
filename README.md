@@ -274,3 +274,31 @@ The `env` file is intended to be renamed to `.env` only on the target VM, not co
 - `assets/lazy-bootstrap-logo.png` — primary square mark.
 - `assets/lazy-bootstrap-logo-small.png` — small icon.
 - `assets/lazy-bootstrap-logo-large.svg` — scalable wordmark source.
+
+### aaPanel updates and post-upgrade recovery
+
+Bootstrap now targets **aaPanel Happy Edition 8.0.7 as a minimum**. If a VM already has
+8.0.7 or a later version, a recovery run will not attempt to downgrade it,
+including when an older `.env` still specifies `AAPANEL_EXPECTED_VERSION=8.0.6`.
+The installer pins its requested version instead of relying on the upstream
+updater's fragile two-second latest-version lookup, which otherwise can fall
+back to an obsolete release when the network is slow.
+
+A checkpointed `22c-panel-upgrade-guard` step installs the narrowly scoped
+`jq-aapanel-upgrade-guard` service and systemd timer. It runs shortly after boot
+and approximately every two minutes. It **skips active vendor upgrades**,
+checks whether the panel is reachable on its configured internal HTTP or HTTPS
+port, starts stopped panel services, and keeps the canonical Nginx panel
+reverse proxy aligned with that protocol. It also repairs an unsupported
+`lua_package_path` setting *only* when Nginx explicitly reports the missing
+Lua directive **and** no active Lua/WAF directives are present. It validates
+Nginx syntax before applying changes, retains root-only backups under
+`/root/jq-aapanel-guard-backups/`, and never changes other website configurations,
+DNS, or SSH. It also normalizes the stock Nginx SysV init script's misleading
+"already running" exit status, so systemd can represent healthy Nginx correctly.
+
+Inspect the guard with `systemctl status jq-aapanel-upgrade-guard.timer`,
+`systemctl status jq-aapanel-upgrade-guard.service`, and
+`journalctl -t jq-aapanel-upgrade-guard`. The guard is a safeguard for known
+configuration drift, **not** a guarantee against unrelated future upstream
+breakages, incompatible WAF updates, or failed packages.

@@ -63,7 +63,7 @@ AAPANEL_URL_PRIMARY="${AAPANEL_URL_PRIMARY:-https://panel.luce.moe/install/insta
 AAPANEL_URL_FALLBACK="${AAPANEL_URL_FALLBACK:-https://aa.maxcdn.top/install/install_7.0_en.sh}"
 AAPANEL_UPGRADE_URL_PRIMARY="${AAPANEL_UPGRADE_URL_PRIMARY:-${AAPANEL_UPGRADE_URL:-https://panel.luce.moe/install/update_7.x_en.sh}}"
 AAPANEL_UPGRADE_URL_FALLBACK="${AAPANEL_UPGRADE_URL_FALLBACK:-https://aa.maxcdn.top/install/update_7.x_en.sh}"
-AAPANEL_EXPECTED_VERSION="${AAPANEL_EXPECTED_VERSION:-8.0.6}"
+AAPANEL_EXPECTED_VERSION="${AAPANEL_EXPECTED_VERSION:-8.0.7}"
 # Exact per-panel certificates avoid Let's Encrypt duplicate-set limits when
 # several servers share the same root zone. Ordinary websites can still use
 # wildcard certificates through aaPanel's normal SSL UI.
@@ -4441,8 +4441,187 @@ aapanel_version() {
   sed -nE "s/^[[:space:]]*g\.version[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" "$version_file" | head -1
 }
 
+# ---------------------------------------------------------------------------
+# Persistent aaPanel update guard. The vendor updater can change its internal
+# HTTP/HTTPS listener and leave BT-Panel stopped or Nginx failed after a reboot.
+# This repair runs outside the bootstrap process after every boot and on a
+# two-minute timer. It only touches the canonical panel vhost and the known
+# unsupported Lua config line, and always tests Nginx before reloading.
+# ---------------------------------------------------------------------------
+verify_aapanel_upgrade_guard() {
+  [[ -x /usr/local/sbin/jq-aapanel-upgrade-guard ]] &&
+    systemctl is-enabled --quiet jq-aapanel-upgrade-guard.timer &&
+    systemctl is-active --quiet jq-aapanel-upgrade-guard.timer
+}
+
+setup_aapanel_upgrade_guard() {
+  install -d -m 0755 /usr/local/sbin
+  cat > /usr/local/sbin/jq-aapanel-upgrade-guard <<'JQ_AAPANEL_GUARD_SOURCE'
+#!/usr/bin/env bash
+# Recover narrowly scoped aaPanel post-upgrade Nginx and panel state.
+# Does not modify DNS, SSH, unrelated vhosts, or replace Nginx packages.
+set -Eeuo pipefail
+[[ $(id -u) == 0 ]] || { echo "Requires root" >&2; exit 2; }
+exec 9>/run/lock/jq-aapanel-upgrade-guard.lock
+flock -n 9 || exit 0
+log(){ logger -t jq-aapanel-upgrade-guard -- "$*" || true; echo "$*"; }
+# Never race the vendor updater while it is changing Python packages/config.
+[[ ! -e /tmp/update_to7.pl ]] || { log "Vendor update active; deferring"; exit 0; }
+root=/www/server/panel
+bin=/www/server/nginx/sbin/nginx
+ngconf=/www/server/nginx/conf/nginx.conf
+domainfile=$root/data/domain.conf
+portfile=$root/data/port.pl
+[[ -x $bin && -f $ngconf && -f $domainfile && -f $portfile ]] || { log "Missing panel/Nginx preconditions"; exit 1; }
+domain=$(tr -d '\r\n' < "$domainfile")
+port=$(tr -d '\r\n' < "$portfile")
+[[ $domain =~ ^[a-zA-Z0-9.-]+$ && $port =~ ^[0-9]+$ ]] || { log "Invalid panel domain or port"; exit 1; }
+vhost=$root/vhost/nginx/$domain.conf
+[[ -f $vhost ]] || { log "Missing canonical panel vhost: $vhost"; exit 1; }
+ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36'
+probe_backend() {
+  local scheme=$1 code
+  code=$(/usr/bin/curl --noproxy '*' -k -sS --connect-timeout 2 --max-time 5 -A "$ua" -H "Host: $domain" -o /dev/null -w '%{http_code}' "$scheme://127.0.0.1:$port/login" 2>/dev/null || true)
+  [[ $code == 200 ]]
+}
+# aaPanel's updater has been observed to report success while both tasks stop.
+if ! probe_backend https && ! probe_backend http; then
+  /etc/init.d/bt start >/dev/null 2>&1 || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if probe_backend https || probe_backend http; then break; fi
+    sleep 2
+  done
+fi
+if [[ -f $root/data/ssl.pl ]]; then expected=https; else expected=http; fi
+if ! probe_backend "$expected"; then
+  log "Panel backend not healthy with configured $expected transport; leaving proxy untouched"
+  exit 1
+fi
+# Only modify known bootstrap-managed panel proxy lines.
+count=$(grep -Ec '^[[:space:]]*proxy_pass[[:space:]]+https?://127\.0\.0\.1:[0-9]+;' "$vhost" || true)
+[[ $count == 1 ]] || { log "Unexpected panel vhost proxy structure; manual review required"; exit 1; }
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+backupdir=/root/jq-aapanel-guard-backups
+install -d -m 700 "$backupdir"
+changed=0
+backup_vhost=""
+backup_nginx=""
+active=$(grep -Ec '^[[:space:]]*lua_package_path[[:space:]]+' "$ngconf" || true)
+if [[ $active == 1 ]] && ! "$bin" -t >/dev/null 2>&1; then
+  diagnostic=$("$bin" -t 2>&1 || true)
+  if grep -Fq 'unknown directive "lua_package_path"' <<< "$diagnostic"; then
+    # Never silently disable an installed Lua WAF or Lua-dependent vhosts.
+    if grep -RIEq '^[[:space:]]*(lua_shared_dict|.*_by_lua(_file)?|include[[:space:]]+.*(luawaf|btwaf|free_waf))' "$ngconf" "$root/vhost/nginx" --include='*.conf' 2>/dev/null; then
+      log "Active Lua/WAF directives present: refusing automatic bypass"
+      exit 1
+    fi
+    backup_nginx=$backupdir/nginx.conf.$stamp
+    cp -p "$ngconf" "$backup_nginx"
+    python3 - "$ngconf" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]);s=p.read_text()
+lines=s.splitlines(keepends=True)
+hits=[i for i,l in enumerate(lines) if l.lstrip().startswith('lua_package_path ')]
+assert len(hits)==1
+i=hits[0];lines[i]='# jq-guard: Nginx binary lacks Lua support; '+lines[i]
+p.write_text(''.join(lines))
+PY
+    changed=1
+    log "Disabled one unsupported Lua path directive, backup $backup_nginx"
+  fi
+fi
+wrong="proxy_pass $([[ $expected == https ]] && echo http || echo https)://127.0.0.1:$port;"
+correct="proxy_pass $expected://127.0.0.1:$port;"
+if grep -Fq "$wrong" "$vhost"; then
+  backup_vhost=$backupdir/panel-vhost.$stamp
+  cp -p "$vhost" "$backup_vhost"
+  python3 - "$vhost" "$wrong" "$correct" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]);s=p.read_text()
+assert s.count(sys.argv[2])==1
+p.write_text(s.replace(sys.argv[2],sys.argv[3]))
+PY
+  changed=1
+  log "Aligned aaPanel reverse proxy with $expected backend; backup $backup_vhost"
+fi
+if ! "$bin" -t >/dev/null 2>&1; then
+  [[ -z $backup_vhost ]] || cp -p "$backup_vhost" "$vhost"
+  [[ -z $backup_nginx ]] || cp -p "$backup_nginx" "$ngconf"
+  log "Nginx configuration test failed: rolled back guarded changes"
+  exit 1
+fi
+# aaPanel's sysv init returns error for 'already running'; correct its LSB status.
+init=/etc/init.d/nginx
+if [[ -f $init ]]; then
+  python3 - "$init" "$backupdir" "$stamp" <<'PY'
+from pathlib import Path
+import sys,shutil
+p=Path(sys.argv[1]);s=p.read_text()
+old='echo "$NAME (pid `pidof $NAME`) already running."\n\t\t\t\texit 1'
+if s.count(old)==2:
+  shutil.copy2(p,Path(sys.argv[2])/('nginx.init.'+sys.argv[3]))
+  p.write_text(s.replace(old,old[:-1]+'0',1))
+  print('Patched LSB already-running exit status')
+PY
+fi
+# Preserve an active master; repair systemd's stale failed/inactive state.
+if systemctl is-active --quiet nginx; then
+  if (( changed )); then "$bin" -s reload || { log "Nginx reload failed"; exit 1; }; fi
+else
+  systemctl daemon-reload
+  systemctl reset-failed nginx 2>/dev/null || true
+  systemctl start nginx || { log "Nginx service start failed"; exit 1; }
+  if (( changed )); then "$bin" -s reload || true; fi
+fi
+status=$(/usr/bin/curl --noproxy '*' -sS --connect-timeout 3 --max-time 8 --resolve "$domain:443:127.0.0.1" -A "$ua" -o /dev/null -w '%{http_code}' "https://$domain/login" 2>/dev/null || true)
+if [[ $status != 200 ]]; then
+  log "Panel public reverse proxy local check returned HTTP $status"
+  exit 1
+fi
+log "Healthy: $domain aaPanel=$expected, Nginx service active, login HTTP 200"
+JQ_AAPANEL_GUARD_SOURCE
+  chmod 0700 /usr/local/sbin/jq-aapanel-upgrade-guard
+  bash -n /usr/local/sbin/jq-aapanel-upgrade-guard ||
+    die "Generated aaPanel upgrade guard has invalid Bash syntax."
+  cat > /etc/systemd/system/jq-aapanel-upgrade-guard.service <<'JQ_AAPANEL_GUARD_SERVICE'
+[Unit]
+Description=Validate and repair aaPanel public login following vendor upgrades
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/jq-aapanel-upgrade-guard
+TimeoutStartSec=90s
+JQ_AAPANEL_GUARD_SERVICE
+  cat > /etc/systemd/system/jq-aapanel-upgrade-guard.timer <<'JQ_AAPANEL_GUARD_TIMER'
+[Unit]
+Description=Run aaPanel safe post-upgrade check at boot and periodically
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=2min
+AccuracySec=20s
+Persistent=true
+Unit=jq-aapanel-upgrade-guard.service
+
+[Install]
+WantedBy=timers.target
+JQ_AAPANEL_GUARD_TIMER
+  systemctl daemon-reload
+  systemctl enable --now jq-aapanel-upgrade-guard.timer
+  verify_aapanel_upgrade_guard || die "aaPanel post-upgrade guard timer did not become active."
+}
+
 verify_aapanel_version() {
-  [[ "$(aapanel_version 2>/dev/null || true)" == "$AAPANEL_EXPECTED_VERSION" ]]
+  # A recovered machine must never be downgraded because its saved .env has
+  # an earlier baseline (e.g. 8.0.6 after a manual 8.0.7 web-panel upgrade).
+  local installed
+  installed="$(aapanel_version 2>/dev/null || true)"
+  [[ "$installed" =~ ^[0-9]+(\.[0-9]+)+$ ]] || return 1
+  [[ "$AAPANEL_EXPECTED_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]] || return 1
+  [[ "$(printf '%s\n%s\n' "$AAPANEL_EXPECTED_VERSION" "$installed" | sort -V | head -n1)" == "$AAPANEL_EXPECTED_VERSION" ]]
 }
 
 download_aapanel_upgrade() {
@@ -4529,6 +4708,23 @@ upgrade_aapanel_to_expected() {
 
   local updater="/root/update_7.x_en.sh"
   download_aapanel_upgrade "$updater"
+  # Upstream's "getLatestOfficialVersion" uses curl -m 2; transient 2s TLS
+  # timeouts made it silently fall back to 7.0.21 and download an invalid ZIP.
+  # Pin the explicitly validated requested baseline instead. Fail closed if
+  # the vendor changes this line rather than guessing.
+  python3 - "$updater" "$AAPANEL_EXPECTED_VERSION" <<'JQ_PIN_AAPANEL_RELEASE'
+from pathlib import Path
+import re, sys
+path = Path(sys.argv[1])
+version = sys.argv[2]
+assert re.fullmatch(r"[0-9]+(?:\.[0-9]+)+", version)
+old = "version=$(curl -Ss --connect-timeout 12 -m 2 $Btapi_Url/api/panel/getLatestOfficialVersion)"
+src = path.read_text()
+if src.count(old) != 1:
+    raise SystemExit("aaPanel updater version detection changed; refusing unpinned update")
+path.write_text(src.replace(old, "version='" + version + "'"))
+JQ_PIN_AAPANEL_RELEASE
+  bash -n "$updater" || die "Pinned aaPanel upgrade script has invalid syntax."
   say "aaPanel Happy Edition upgrade: applying ${AAPANEL_EXPECTED_VERSION} update path"
   bash "$updater"
 
@@ -6751,6 +6947,7 @@ main() {
   run_step "21-panel-vhost"         verify_panel_vhost           write_final_nginx_vhost
   run_step "22-panel-domain"        verify_panel_domain_binding  bind_aapanel_domain
   run_step "22b-panel-branding"      verify_aapanel_branding        setup_aapanel_branding
+  run_step "22c-panel-upgrade-guard" verify_aapanel_upgrade_guard setup_aapanel_upgrade_guard
   run_step "23-host-firewall"       verify_host_firewall          setup_host_firewall
   run_step "24-ai-cli"              verify_ai_cli                 setup_ai_cli
   run_step "25-ai-stack"            verify_ai_compose             setup_ai_compose
