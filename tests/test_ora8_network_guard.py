@@ -15,12 +15,12 @@ class Ora8PostflightTests(unittest.TestCase):
         subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
 
     def test_explicit_empty_decision_model_is_preserved(self):
-        self.assertIn('AI_DECISION_MODEL="\${AI_DECISION_MODEL-tev1:0.8b}"', self.source)
-        self.assertNotIn('AI_DECISION_MODEL="\${AI_DECISION_MODEL:-tev1:0.8b}"', self.source)
+        self.assertIn('AI_DECISION_MODEL="${AI_DECISION_MODEL-tev1:0.8b}"', self.source)
+        self.assertNotIn('AI_DECISION_MODEL="${AI_DECISION_MODEL:-tev1:0.8b}"', self.source)
 
     def test_explicit_empty_task_model_is_preserved(self):
-        self.assertIn('TASK_MODEL="\${TASK_MODEL-tev1:0.8b}"', self.source)
-        self.assertNotIn('TASK_MODEL="\${TASK_MODEL:-tev1:0.8b}"', self.source)
+        self.assertIn('TASK_MODEL="${TASK_MODEL-tev1:0.8b}"', self.source)
+        self.assertNotIn('TASK_MODEL="${TASK_MODEL:-tev1:0.8b}"', self.source)
 
     def test_cloudflare_postflight_runs_after_local_audit(self):
         self.assertEqual(self.source.count("verify_public_panel_via_cloudflare() {"), 1)
@@ -33,7 +33,7 @@ class Ora8PostflightTests(unittest.TestCase):
         end = self.source.index("\n}\n", start)
         check = self.source[start:end]
         self.assertIn("--noproxy '*'", check)
-        self.assertIn('https://\${AAPANEL_DOMAIN}/login', check)
+        self.assertIn('https://${AAPANEL_DOMAIN}/login', check)
         self.assertIn('if [[ "$proxied" != true ]]', check)
 
 if __name__ == "__main__":
