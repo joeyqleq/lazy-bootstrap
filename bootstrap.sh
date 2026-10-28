@@ -6923,7 +6923,7 @@ verify_public_panel_via_cloudflare() {
   local dns proxied code attempt ua
   ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36'
   find_cloudflare_zone
-  if ! dns="$(cloudflare_api "zones/\${CF_ZONE_ID}/dns_records?name=\${AAPANEL_DOMAIN}&per_page=100" 2>/dev/null)"; then
+  if ! dns="$(cloudflare_api "zones/${CF_ZONE_ID}/dns_records?name=${AAPANEL_DOMAIN}&per_page=100" 2>/dev/null)"; then
     warn "External panel check skipped: unable to inspect Cloudflare record. Internet ingress is UNVERIFIED."
     return 0
   fi
@@ -6936,12 +6936,12 @@ verify_public_panel_via_cloudflare() {
   for attempt in 1 2 3; do
     code="$(curl -4 -L -sS --noproxy '*' --connect-timeout 5 --max-time 15 \
       -A "$ua" -o /dev/null -w '%{http_code}' \
-      "https://\${AAPANEL_DOMAIN}/login" 2>/dev/null || true)"
+      "https://${AAPANEL_DOMAIN}/login" 2>/dev/null || true)"
     if [[ "$code" == 200 ]]; then
       ok "External aaPanel access via Cloudflare: HTTPS /login returns HTTP 200."
       return 0
     fi
-    warn "Cloudflare/public aaPanel probe attempt $attempt/3: HTTP \${code:-000} (expected 200)."
+    warn "Cloudflare/public aaPanel probe attempt $attempt/3: HTTP ${code:-000} (expected 200)."
     (( attempt == 3 )) || sleep 4
   done
   warn "Local aaPanel/Nginx passed but public HTTPS FAILED. Check OCI VNIC public IP, Security List/NSG ingress TCP/443 and Cloudflare origin settings."
