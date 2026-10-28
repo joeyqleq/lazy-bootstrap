@@ -76,6 +76,43 @@ For an alternate environment-file path, set `BOOTSTRAP_ENV_FILE=/path/to/file` w
 
 The script randomizes the **predefined theme pair** on each invocation, including recovery. It does not randomly invent a color palette or mix incompatible prompt fragments.
 
+## Oracle Cloud external network readiness
+
+The installer's normal SSH, panel, and Nginx verification is **local to the VM**.
+These checks cannot open or verify OCI VCN **Security List / Network Security
+Group (NSG)** ingress rules. A guest OS firewall check is not a substitute for
+OCI ingress. Before the final SSH hardening step, allow incoming **TCP/6722**
+(or the configured `SSH_PORT`) in the associated OCI Security List/NSG, ideally
+restricted to trusted source IPs; allow TCP/80 and TCP/443 for public web access.
+You do not need to expose aaPanel's internal TCP/8886 directly.
+
+After the local final audit, Bootstrap now checks `https://<AAPANEL_DOMAIN>/login`
+via **Cloudflare** when the panel DNS record is proxied. If Cloudflare does not
+return HTTP 200, Bootstrap returns a failure with the OCI/DNS troubleshooting
+message rather than printing an unqualified `BOOTSTRAP COMPLETE` banner.
+This is a genuine inbound test through the Cloudflare edge, but **not** a
+guarantee of external SSH reachability. For DNS-only panel records, the probe
+is skipped with an explicit warning because VM-to-own-public-IP hairpin
+behavior is provider-dependent. The same applies if Cloudflare DNS cannot
+be queried at that moment.
+
+Test new SSH login from a **second device/network** while the original SSH
+session remains open:
+
+```bash
+ssh -p 6722 jq@<PUBLIC_IPV4>
+```
+
+Do not use Tailscale connectivity as proof that OCI public ingress is open.
+For a failed deployment, fix OCI ingress first, then use Bootstrap's
+**Recovery** mode, not a second Fresh installation.
+
+An explicitly empty `AI_DECISION_MODEL=''` disables the optional
+Ollama decision-model pull/readiness test, and an explicitly empty
+`TASK_MODEL=''` avoids forcibly selecting a task model for Open WebUI.
+Unset values still retain the traditional defaults. An empty model field
+does not change SSH, DNS, or Nginx behavior.
+
 ## AI model policy
 
 The defaults are conservative about concurrent memory use: Ollama is configured for one loaded model and one parallel request. The bootstrap's model choice is based on physical RAM, not on the VM's marketing label.
