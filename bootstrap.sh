@@ -135,7 +135,7 @@ AI_COMPOSE_NAME="${AI_COMPOSE_NAME:-openwebui-ollama}"
 AI_PRIMARY_MODEL="${AI_PRIMARY_MODEL:-auto}"
 AI_REASONING_MODEL="${AI_REASONING_MODEL:-gpt-oss:20b}"
 AI_PULL_REASONING_MODEL="${AI_PULL_REASONING_MODEL:-1}"
-AI_DECISION_MODEL="${AI_DECISION_MODEL:-tev1:0.8b}"
+AI_DECISION_MODEL="${AI_DECISION_MODEL-tev1:0.8b}"
 AI_PULL_DECISION_MODEL="${AI_PULL_DECISION_MODEL:-1}"
 OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.11.4-slim}"
 AI_MIN_LOCAL_RAM_MIB="${AI_MIN_LOCAL_RAM_MIB:-6144}"
@@ -161,7 +161,7 @@ SUBAGENTS_MAX_CONCURRENT="${SUBAGENTS_MAX_CONCURRENT:-4}"
 SUBAGENTS_MAX_ASYNC="${SUBAGENTS_MAX_ASYNC:-4}"
 SUBAGENTS_MAX_ITERATIONS="${SUBAGENTS_MAX_ITERATIONS:-30}"
 SUBAGENTS_MAX_OUTPUT="${SUBAGENTS_MAX_OUTPUT:-30000}"
-TASK_MODEL="${TASK_MODEL:-tev1:0.8b}"
+TASK_MODEL="${TASK_MODEL-tev1:0.8b}"
 WEBUI_URL="${WEBUI_URL:-auto}"
 ENABLE_API_KEYS="${ENABLE_API_KEYS:-true}"
 ENABLE_OLLAMA_API="${ENABLE_OLLAMA_API:-true}"
@@ -6914,6 +6914,40 @@ final_audit_with_repair() {
   fi
 }
 
+
+# The normal panel/SSH checks deliberately use loopback, so they cannot tell
+# whether OCI security lists/NSGs let a public client through. A Cloudflare-
+# proxied panel domain gives us one independent origin reachability check.
+# DNS-only records and external SSH cannot be verified from inside the VM.
+verify_public_panel_via_cloudflare() {
+  local dns proxied code attempt ua
+  ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36'
+  find_cloudflare_zone
+  if ! dns="$(cloudflare_api "zones/\${CF_ZONE_ID}/dns_records?name=\${AAPANEL_DOMAIN}&per_page=100" 2>/dev/null)"; then
+    warn "External panel check skipped: unable to inspect Cloudflare record. Internet ingress is UNVERIFIED."
+    return 0
+  fi
+  proxied="$(jq -r --arg domain "$AAPANEL_DOMAIN" \
+    '[.result[] | select(.name == $domain and (.type == "A" or .type == "AAAA" or .type == "CNAME")) | .proxied] | any' <<<"$dns" 2>/dev/null || echo false)"
+  if [[ "$proxied" != true ]]; then
+    warn "External panel check skipped: $AAPANEL_DOMAIN is DNS-only. OCI TCP/443 ingress is UNVERIFIED."
+    return 0
+  fi
+  for attempt in 1 2 3; do
+    code="$(curl -4 -L -sS --noproxy '*' --connect-timeout 5 --max-time 15 \
+      -A "$ua" -o /dev/null -w '%{http_code}' \
+      "https://\${AAPANEL_DOMAIN}/login" 2>/dev/null || true)"
+    if [[ "$code" == 200 ]]; then
+      ok "External aaPanel access via Cloudflare: HTTPS /login returns HTTP 200."
+      return 0
+    fi
+    warn "Cloudflare/public aaPanel probe attempt $attempt/3: HTTP \${code:-000} (expected 200)."
+    (( attempt == 3 )) || sleep 4
+  done
+  warn "Local aaPanel/Nginx passed but public HTTPS FAILED. Check OCI VNIC public IP, Security List/NSG ingress TCP/443 and Cloudflare origin settings."
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Main sequence
 # ---------------------------------------------------------------------------
@@ -6959,6 +6993,10 @@ main() {
   CURRENT_STEP="28-final-audit"
   final_audit_with_repair
 
+  CURRENT_STEP="29-public-cloudflare-reachability"
+  verify_public_panel_via_cloudflare ||
+    die "Public aaPanel HTTPS is unreachable even though local checks passed. Check OCI ingress TCP/443 and DNS; use Recovery mode after fixing."
+
   echo
   echo "================================================================"
   echo "BOOTSTRAP COMPLETE"
@@ -6991,6 +7029,8 @@ main() {
   echo
   echo "The script configures the guest OS firewall when it can, but it cannot"
   echo "modify an external cloud firewall/security-list rule without provider credentials."
+  echo "WARNING: Public SSH on TCP/$SSH_PORT has NOT been tested from a second network."
+  echo "OCI Security List/NSG ingress TCP/$SSH_PORT must be permitted separately."
   echo "================================================================"
 
   # No manual account switching is required. If this was an interactive run,
