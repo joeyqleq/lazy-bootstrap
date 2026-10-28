@@ -16,6 +16,8 @@ jobs:
         run: |
           bash -n bootstrap.sh
           bash -n env
+      - name: ORA8 regression checks
+        run: python3 -m unittest discover -s tests -p 'test_ora8_network_guard.py'
       - name: Validate documented template and scan for credentials
         run: |
           python3 - <<'PY'
